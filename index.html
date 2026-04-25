@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Dual Barcode Scanner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <!-- Google Identity Services for Drive OAuth -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <style>
+        #reader__dashboard_section_csr span {
+            display: none;
+        }
+
+        #reader__dashboard_section_swaplink {
+            display: none;
+        }
+
+        #reader video {
+            object-fit: cover;
+            border-radius: 0.5rem;
+        }
+
+        .slide-down {
+            animation: slideDown 0.2s ease-out;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+
+<body class="bg-gray-50 text-gray-900 font-sans antialiased min-h-screen flex flex-col relative">
+
+    <!-- Toast -->
+    <div id="toast"
+        class="fixed top-4 left-1/2 transform -translate-x-1/2 opacity-0 transition-opacity duration-300 px-4 py-3 rounded-lg text-center text-sm font-bold z-50 pointer-events-none shadow-lg w-11/12 max-w-sm">
+    </div>
+
+    <!-- Confirm Clear Modal -->
+    <div id="confirm-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-[60]">
+        <div class="bg-white rounded-xl p-5 max-w-sm w-11/12 shadow-xl">
+            <h3 class="text-lg font-bold text-gray-900 mb-2">Clear Records?</h3>
+            <p class="text-sm text-gray-600 mb-4">Are you sure you want to delete all scanned records? This cannot be
+                undone.</p>
+            <div class="flex justify-end gap-3">
+                <button id="modal-cancel"
+                    class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancel</button>
+                <button id="modal-confirm"
+                    class="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors">Clear
+                    All</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Edit Modal -->
+    <div id="edit-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-[60]">
+        <div class="bg-white rounded-xl p-5 max-w-sm w-11/12 shadow-xl">
+            <h3 class="text-lg font-bold text-gray-900 mb-4">Edit Record</h3>
+            <div class="flex flex-col gap-3 mb-4">
+                <div>
+                    <label class="text-xs font-bold text-gray-600 uppercase mb-1 block">Install No. (1–999)</label>
+                    <input id="edit-install" type="number" min="1" max="999"
+                        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        placeholder="e.g. 42">
+                </div>
+                <div>
+                    <label class="text-xs font-bold text-gray-600 uppercase mb-1 block">Barcode (7–13 digits)</label>
+                    <input id="edit-barcode" type="text" inputmode="numeric" maxlength="13"
+                        class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                        placeholder="e.g. 1234567890">
+                </div>
+            </div>
+            <div class="flex justify-end gap-3">
+                <button id="edit-cancel"
+                    class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancel</button>
+                <button id="edit-save"
+                    class="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition-colors">Save
+                    Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <header class="bg-blue-600 text-white p-4 shadow-md flex justify-between items-center z-10">
+        <h1 class="text-xl font-bold tracking-tight">Scan2Sheet</h1>
+        <span class="bg-blue-800 text-xs py-1 px-2 rounded-full" id="count-badge">0 records</span>
+    </header>
+
+    <main class="flex-1 flex flex-col p-4 w-full max-w-lg mx-auto gap-4">
+
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-3 flex flex-col gap-3">
+
+            <!-- Workflow State Indicator -->
+            <div id="workflow-status"
+                class="bg-blue-50 border border-blue-200 p-3 rounded-lg text-center transition-colors">
+                <div class="text-blue-700 font-bold text-lg">Step 1: Install No.</div>
+                <div class="text-sm text-blue-600 font-medium">Scan QR Code (1–999, leading zeros stripped)</div>
+            </div>
+
+            <div id="reader"
+                class="w-full bg-gray-100 rounded-lg overflow-hidden min-h-[250px] relative flex items-center justify-center">
+                <span id="camera-placeholder" class="text-gray-400 text-sm absolute">Camera paused</span>
+            </div>
+
+            <div class="flex gap-2">
+                <button id="btn-start"
+                    class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors">Start
+                    Camera</button>
+                <button id="btn-stop"
+                    class="flex-1 bg-red-100 hover:bg-red-200 text-red-700 font-semibold py-3 px-4 rounded-lg transition-colors hidden">Stop
+                    Camera</button>
+            </div>
+
+            <!-- Manual Entry Toggle -->
+            <button id="btn-manual-toggle"
+                class="w-full text-sm text-gray-500 hover:text-blue-600 border border-dashed border-gray-300 hover:border-blue-400 py-2 rounded-lg transition-colors font-medium flex items-center justify-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 112.828 2.828L11.828 15.828a2 2 0 01-1.414.586H9v-2a2 2 0 01.586-1.414z" />
+                </svg>
+                Manual Entry
+            </button>
+
+            <!-- Manual Entry Form -->
+            <div id="manual-entry-form"
+                class="hidden slide-down bg-gray-50 border border-gray-200 rounded-lg p-3 flex flex-col gap-3">
+                <p class="text-xs text-gray-500 font-medium text-center">Enter values manually if camera is unavailable
+                </p>
+                <div class="flex gap-2">
+                    <div class="flex-1">
+                        <label class="text-xs font-bold text-gray-600 uppercase mb-1 block">Install No.</label>
+                        <input id="manual-install" type="number" min="1" max="999"
+                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                            placeholder="1–999">
+                    </div>
+                    <div class="flex-1">
+                        <label class="text-xs font-bold text-gray-600 uppercase mb-1 block">Barcode</label>
+                        <input id="manual-barcode" type="text" inputmode="numeric" maxlength="13"
+                            class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
+                            placeholder="7–13 digits">
+                    </div>
+                </div>
+                <button id="btn-manual-save"
+                    class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-2 px-4 rounded-lg transition-colors text-sm">Save
+                    Pair</button>
+            </div>
+        </div>
+
+        <!-- Records Table -->
+        <div class="bg-white rounded-xl shadow-sm border border-gray-200 flex-1 flex flex-col overflow-hidden">
+            <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                <h2 class="font-semibold text-gray-700">Completed Records</h2>
+                <div class="flex gap-2">
+                    <button id="btn-clear"
+                        class="text-sm text-gray-500 hover:text-red-600 px-2 py-1 font-medium">Clear</button>
+                    <button id="btn-export"
+                        class="text-sm bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded flex items-center gap-1 transition-colors font-medium shadow-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                        </svg>
+                        CSV
+                    </button>
+                    <button id="btn-drive"
+                        class="text-sm bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded flex items-center gap-1 transition-colors font-medium shadow-sm">
+                        <svg class="w-4 h-4" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
+                            <path
+                                d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z"
+                                fill="#fff" />
+                            <path
+                                d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z"
+                                fill="#fff" />
+                            <path
+                                d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z"
+                                fill="#fff" />
+                            <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z"
+                                fill="#fff" />
+                            <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z"
+                                fill="#fff" />
+                            <path
+                                d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z"
+                                fill="#fff" />
+                        </svg>
+                        Drive
+                    </button>
+                </div>
+            </div>
+            <div class="overflow-y-auto flex-1 p-0">
+                <table class="w-full text-left border-collapse">
+                    <thead class="bg-gray-50 sticky top-0 border-b border-gray-200 shadow-sm">
+                        <tr>
+                            <th class="p-3 text-xs font-bold text-gray-700 uppercase">Install No.</th>
+                            <th class="p-3 text-xs font-bold text-gray-700 uppercase">Barcode</th>
+                            <th class="p-3 text-xs font-bold text-gray-700 uppercase text-right">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="table-body" class="divide-y divide-gray-100">
+                        <tr id="empty-state">
+                            <td colspan="3" class="p-8 text-center text-gray-400 text-sm">No pairs scanned yet.</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        const STORAGE_KEY = 'scan2sheet_records';
+        let html5QrCode;
+        let scannedItems = [];
+        let isScanning = false;
+        let step = 1;
+        let currentInstallNo = null;
+        let pendingBarcode = null;
+        let lastScannedTime = 0;
+        let editingIndex = null;
+
+        // UI refs
+        const btnStart = document.getElementById('btn-start');
+        const btnStop = document.getElementById('btn-stop');
+        const btnExport = document.getElementById('btn-export');
+        const btnClear = document.getElementById('btn-clear');
+        const tableBody = document.getElementById('table-body');
+        const emptyState = document.getElementById('empty-state');
+        const countBadge = document.getElementById('count-badge');
+        const cameraPlaceholder = document.getElementById('camera-placeholder');
+        const workflowStatus = document.getElementById('workflow-status');
+        const confirmModal = document.getElementById('confirm-modal');
+        const modalCancel = document.getElementById('modal-cancel');
+        const modalConfirm = document.getElementById('modal-confirm');
+        const editModal = document.getElementById('edit-modal');
+        const editInstall = document.getElementById('edit-install');
+        const editBarcode = document.getElementById('edit-barcode');
+        const editCancel = document.getElementById('edit-cancel');
+        const editSave = document.getElementById('edit-save');
+        const btnManualToggle = document.getElementById('btn-manual-toggle');
+        const manualEntryForm = document.getElementById('manual-entry-form');
+        const manualInstall = document.getElementById('manual-install');
+        const manualBarcode = document.getElementById('manual-barcode');
+        const btnManualSave = document.getElementById('btn-manual-save');
+
+        // ── LocalStorage ────────────────────────────────────────────────
+        function saveToStorage() {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(scannedItems));
+        }
+
+        function loadFromStorage() {
+            try {
+                const saved = localStorage.getItem(STORAGE_KEY);
+                if (saved) scannedItems = JSON.parse(saved);
+            } catch (e) {
+                scannedItems = [];
+            }
+        }
+
+        // ── Init ─────────────────────────────────────────────────────────
+        window.addEventListener('load', () => {
+            html5QrCode = new Html5Qrcode("reader");
+            loadFromStorage();
+
+            // iOS fix: set playsinline on the video element html5-qrcode creates
+            // dynamically so iPhones don't force the feed into full-screen mode.
+            const readerEl = document.getElementById('reader');
+            const playsinlineObserver = new MutationObserver(() => {
+                const video = readerEl.querySelector('video');
+                if (video && !video.hasAttribute('playsinline')) {
+                    video.setAttribute('playsinline', '');
+                    video.setAttribute('webkit-playsinline', '');
+                }
+            });
+            playsinlineObserver.observe(readerEl, { childList: true, subtree: true });
+            updateTableUI();
+        });
+
+        // ── Camera ───────────────────────────────────────────────────────
+        btnStart.addEventListener('click', async () => {
+            try {
+                cameraPlaceholder.style.display = 'none';
+                await html5QrCode.start(
+                    { facingMode: "environment" },
+                    {
+                        fps: 10, qrbox: { width: 250, height: 150 },
+                        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.CODE_39]
+                    },
+                    onScanSuccess
+                );
+                isScanning = true;
+                btnStart.classList.add('hidden');
+                btnStop.classList.remove('hidden');
+            } catch (err) {
+                console.error("Camera start failed:", err);
+                showToast("Could not start camera. Use Manual Entry below.", "error");
+                cameraPlaceholder.style.display = 'block';
+                // Auto-open manual entry on camera failure
+                manualEntryForm.classList.remove('hidden');
+                btnManualToggle.classList.add('text-blue-600', 'border-blue-400');
+            }
+        });
+
+        btnStop.addEventListener('click', async () => {
+            if (isScanning) {
+                try {
+                    await html5QrCode.stop();
+                    isScanning = false;
+                    btnStop.classList.add('hidden');
+                    btnStart.classList.remove('hidden');
+                    cameraPlaceholder.style.display = 'block';
+                } catch (err) { console.error("Failed to stop scanner", err); }
+            }
+        });
+
+        // ── Manual Entry ─────────────────────────────────────────────────
+        btnManualToggle.addEventListener('click', () => {
+            const hidden = manualEntryForm.classList.toggle('hidden');
+            if (!hidden) manualEntryForm.classList.add('slide-down');
+        });
+
+        btnManualSave.addEventListener('click', () => {
+            const installVal = manualInstall.value.trim();
+            const barcodeVal = manualBarcode.value.trim();
+
+            if (!isValidInstallNo(installVal)) {
+                showToast("Invalid Install No.: Must be numeric 1–999.", "error"); return;
+            }
+            if (!isValidBarcode(barcodeVal)) {
+                showToast("Invalid Barcode: Must be 7–13 digits.", "error"); return;
+            }
+            if (isDuplicatePair(installVal, barcodeVal)) {
+                showToast(`Duplicate! ${installVal} + ${barcodeVal} already saved.`, "error"); return;
+            }
+
+            addRecordToTable(installVal, barcodeVal);
+            showToast("Pair manually saved!", "success");
+            manualInstall.value = '';
+            manualBarcode.value = '';
+            manualInstall.focus();
+        });
+
+        // Allow Enter key to save manual entry
+        [manualInstall, manualBarcode].forEach(el => {
+            el.addEventListener('keydown', e => { if (e.key === 'Enter') btnManualSave.click(); });
+        });
+
+        // ── Validation ───────────────────────────────────────────────────
+        function isValidInstallNo(text) {
+            if (!/^\d{1,3}$/.test(text)) return false;
+            const n = parseInt(text, 10);
+            return n >= 1 && n <= 999;
+        }
+
+        // Normalise leading zeros: "001" → "1"
+        function normaliseInstallNo(text) {
+            return String(parseInt(text, 10));
+        }
+
+        function isValidBarcode(text) {
+            // Must be exactly 7–13 numeric digits
+            return /^\d{7,13}$/.test(text);
+        }
+
+        function isDuplicatePair(installNo, barcode, excludeIndex = -1) {
+            return scannedItems.some((item, i) =>
+                i !== excludeIndex && item.installNo === installNo && item.barcode === barcode
+            );
+        }
+
+        // ── Toast ────────────────────────────────────────────────────────
+        function showToast(msg, type = 'success') {
+            const toast = document.getElementById('toast');
+            toast.innerText = msg;
+            const base = "fixed top-4 left-1/2 transform -translate-x-1/2 transition-opacity duration-300 px-4 py-3 rounded-lg text-center text-sm font-bold z-50 pointer-events-none shadow-lg w-11/12 max-w-sm opacity-100 ";
+            toast.className = base + (type === 'success'
+                ? "bg-green-100 border border-green-400 text-green-800"
+                : "bg-red-100 border border-red-400 text-red-800");
+            clearTimeout(window.toastTimer);
+            window.toastTimer = setTimeout(() => {
+                toast.classList.remove('opacity-100');
+                toast.classList.add('opacity-0');
+            }, 2500);
+        }
+
+        // ── Workflow UI ───────────────────────────────────────────────────
+        function updateWorkflowUI() {
+            if (step === 1) {
+                workflowStatus.innerHTML = `
+                    <div class="text-blue-700 font-bold text-lg">Step 1: Install No.</div>
+                    <div class="text-sm text-blue-600 font-medium">Scan QR Code (1–999, leading zeros stripped)</div>`;
+                workflowStatus.className = "bg-blue-50 border border-blue-200 p-3 rounded-lg text-center transition-colors";
+            } else if (step === 2) {
+                workflowStatus.innerHTML = `
+                    <div class="text-indigo-800 font-bold text-lg">Step 2: Barcode</div>
+                    <div class="text-sm text-indigo-700 font-medium mb-2">Scan Code 39 for Install No: <span class="font-black text-lg bg-white px-2 py-0.5 rounded border border-indigo-200">${currentInstallNo}</span></div>
+                    <button onclick="resetWorkflow()" class="mt-1 text-xs bg-white border border-indigo-300 text-indigo-700 font-bold px-3 py-1.5 rounded-md hover:bg-indigo-100 shadow-sm transition-colors">Cancel & Rescan QR</button>`;
+                workflowStatus.className = "bg-indigo-100 border border-indigo-300 p-3 rounded-lg text-center transition-colors shadow-inner";
+            } else if (step === 3) {
+                workflowStatus.innerHTML = `
+                    <div class="text-green-800 font-bold text-lg">Step 3: Confirm Barcode</div>
+                    <div class="text-sm text-green-700 font-medium mb-1">Install No: <span class="font-black text-lg bg-white px-2 py-0.5 rounded border border-green-200">${currentInstallNo}</span></div>
+                    <div class="text-sm text-green-700 font-medium mb-3">Scanned Code 39: <span class="font-mono font-black text-lg bg-white px-2 py-0.5 rounded border border-green-200">${pendingBarcode}</span></div>
+                    <div class="flex gap-2 justify-center">
+                        <button onclick="rescanBarcode()" class="text-sm bg-white border border-red-300 text-red-700 font-bold px-4 py-2 rounded-md hover:bg-red-50 shadow-sm transition-colors">Rescan</button>
+                        <button onclick="acceptBarcode()" class="text-sm bg-green-600 border border-transparent text-white font-bold px-4 py-2 rounded-md hover:bg-green-700 shadow-sm transition-colors">Accept</button>
+                    </div>`;
+                workflowStatus.className = "bg-green-50 border border-green-400 p-3 rounded-lg text-center transition-colors shadow-inner";
+            }
+        }
+
+        window.resetWorkflow = () => { currentInstallNo = null; pendingBarcode = null; step = 1; updateWorkflowUI(); };
+        window.rescanBarcode = () => { pendingBarcode = null; step = 2; updateWorkflowUI(); };
+        window.acceptBarcode = () => {
+            if (navigator.vibrate) navigator.vibrate([50, 100, 50]);
+            showToast("Pair successfully saved!", "success");
+            addRecordToTable(currentInstallNo, pendingBarcode);
+            currentInstallNo = null; pendingBarcode = null; step = 1;
+            updateWorkflowUI();
+        };
+
+        // ── Scanner Callback ──────────────────────────────────────────────
+        function onScanSuccess(decodedText, decodedResult) {
+            const now = Date.now();
+            if (now - lastScannedTime < 1500) return;
+            if (step === 3) return;
+
+            const formatInt = decodedResult?.result?.format?.format;
+            const isQR = formatInt === Html5QrcodeSupportedFormats.QR_CODE;
+            const isCode39 = formatInt === Html5QrcodeSupportedFormats.CODE_39;
+
+            if (step === 1) {
+                if (!isQR) { showToast("Wrong format. Please scan a QR Code.", "error"); lastScannedTime = now; return; }
+                if (!isValidInstallNo(decodedText)) { showToast("Invalid QR: Must be numeric 1–999.", "error"); lastScannedTime = now; return; }
+                if (navigator.vibrate) navigator.vibrate(50);
+                currentInstallNo = normaliseInstallNo(decodedText); step = 2; updateWorkflowUI(); lastScannedTime = now;
+            } else if (step === 2) {
+                if (!isCode39) { showToast("Wrong format. Please scan a Code 39 barcode.", "error"); lastScannedTime = now; return; }
+                if (!isValidBarcode(decodedText)) { showToast("Invalid Barcode: Must be 7–13 digits.", "error"); lastScannedTime = now; return; }
+                if (isDuplicatePair(currentInstallNo, decodedText)) { showToast(`Duplicate! ${currentInstallNo} + ${decodedText} already saved.`, "error"); lastScannedTime = now; return; }
+                if (navigator.vibrate) navigator.vibrate(50);
+                pendingBarcode = decodedText; step = 3; updateWorkflowUI(); lastScannedTime = now;
+            }
+        }
+
+        // ── Records ───────────────────────────────────────────────────────
+        function addRecordToTable(installNo, barcode) {
+            scannedItems.unshift({ installNo, barcode });
+            saveToStorage();
+            updateTableUI();
+        }
+
+        function updateTableUI() {
+            countBadge.innerText = `${scannedItems.length} record${scannedItems.length !== 1 ? 's' : ''}`;
+
+            if (scannedItems.length === 0) {
+                tableBody.innerHTML = '';
+                tableBody.appendChild(emptyState);
+                emptyState.style.display = 'table-row';
+                return;
+            }
+
+            emptyState.style.display = 'none';
+            tableBody.innerHTML = scannedItems.map((item, i) => `
+                <tr class="hover:bg-gray-50 transition-colors">
+                    <td class="p-3 text-sm font-bold text-blue-800 whitespace-nowrap">${item.installNo}</td>
+                    <td class="p-3 text-sm font-mono font-medium text-gray-900 break-all">${item.barcode}</td>
+                    <td class="p-3 text-right whitespace-nowrap">
+                        <button onclick="openEditModal(${i})" title="Edit" class="inline-flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors mr-1">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536M9 13l6.586-6.586a2 2 0 112.828 2.828L11.828 15.828a2 2 0 01-1.414.586H9v-2a2 2 0 01.586-1.414z"/></svg>
+                        </button>
+                        <button onclick="deleteRecord(${i})" title="Delete" class="inline-flex items-center justify-center w-7 h-7 rounded-md text-gray-400 hover:text-red-600 hover:bg-red-50 transition-colors">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2"/></svg>
+                        </button>
+                    </td>
+                </tr>
+            `).join('');
+        }
+
+        // ── Edit Modal ────────────────────────────────────────────────────
+        window.openEditModal = (index) => {
+            editingIndex = index;
+            const item = scannedItems[index];
+            editInstall.value = item.installNo;
+            editBarcode.value = item.barcode;
+            editModal.classList.remove('hidden');
+            editInstall.focus();
+        };
+
+        editCancel.addEventListener('click', () => { editModal.classList.add('hidden'); editingIndex = null; });
+
+        editSave.addEventListener('click', () => {
+            const installVal = String(editInstall.value).trim();
+            const barcodeVal = String(editBarcode.value).trim();
+
+            if (!isValidInstallNo(installVal)) { showToast("Invalid Install No.: Must be numeric 1–999.", "error"); return; }
+            if (!isValidBarcode(barcodeVal)) { showToast("Invalid Barcode: Must be 7–13 digits.", "error"); return; }
+            if (isDuplicatePair(installVal, barcodeVal, editingIndex)) {
+                showToast(`Duplicate! ${installVal} + ${barcodeVal} already saved.`, "error"); return;
+            }
+
+            scannedItems[editingIndex] = { installNo: installVal, barcode: barcodeVal };
+            saveToStorage();
+            updateTableUI();
+            editModal.classList.add('hidden');
+            editingIndex = null;
+            showToast("Record updated.", "success");
+        });
+
+        // ── Delete ────────────────────────────────────────────────────────
+        window.deleteRecord = (index) => {
+            scannedItems.splice(index, 1);
+            saveToStorage();
+            updateTableUI();
+            showToast("Record deleted.", "success");
+        };
+
+        // ── Export ────────────────────────────────────────────────────────
+        btnExport.addEventListener('click', () => {
+            if (scannedItems.length === 0) { showToast("No records to export yet!", "error"); return; }
+            const csv = "install no.,barcode\n" + scannedItems.map(r => `"${r.installNo}","${r.barcode}"`).join("\n");
+            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", `install_records_${Date.now()}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+
+        // ── Clear ─────────────────────────────────────────────────────────
+        btnClear.addEventListener('click', () => { if (scannedItems.length > 0) confirmModal.classList.remove('hidden'); });
+        modalCancel.addEventListener('click', () => confirmModal.classList.add('hidden'));
+        modalConfirm.addEventListener('click', () => {
+            scannedItems = [];
+            saveToStorage();
+            updateTableUI();
+            confirmModal.classList.add('hidden');
+            showToast("Records cleared.", "success");
+        });
+        // ── Google Drive ───────────────────────────────────────────────────
+        // ⚠️  Replace with your OAuth 2.0 Client ID from Google Cloud Console.
+        // Authorised JavaScript origin must include your GitHub Pages URL,
+        // e.g. https://yourusername.github.io
+        const GOOGLE_CLIENT_ID = '12810830972-fhdnfsv95u8cc9sgjor75aqqe5phe05l.apps.googleusercontent.com';
+        const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
+
+        let tokenClient = null;
+        let accessToken = null;
+        let tokenExpiry = 0;
+
+        function initTokenClient() {
+            if (!window.google) return; // GIS not loaded yet
+            tokenClient = google.accounts.oauth2.initTokenClient({
+                client_id: GOOGLE_CLIENT_ID,
+                scope: DRIVE_SCOPE,
+                callback: '' // set dynamically per-request
+            });
+        }
+
+        // Called by the GIS script once loaded
+        window.onGoogleLibraryLoad = initTokenClient;
+
+        function getAccessToken() {
+            return new Promise((resolve, reject) => {
+                if (!tokenClient) {
+                    reject(new Error('Google Identity Services not loaded yet. Check your internet connection.'));
+                    return;
+                }
+                if (accessToken && Date.now() < tokenExpiry) {
+                    resolve(accessToken); return;
+                }
+                tokenClient.callback = (response) => {
+                    if (response.error) { reject(new Error(response.error)); return; }
+                    accessToken = response.access_token;
+                    tokenExpiry = Date.now() + (response.expires_in * 1000) - 60000;
+                    resolve(accessToken);
+                };
+                // Skip consent screen if we already have a cached token
+                tokenClient.requestAccessToken({ prompt: accessToken ? '' : 'consent' });
+            });
+        }
+
+        async function saveToDrive() {
+            if (scannedItems.length === 0) { showToast('No records to save!', 'error'); return; }
+            if (GOOGLE_CLIENT_ID === 'YOUR_CLIENT_ID_HERE') {
+                showToast('Add your Google Client ID to the app first.', 'error'); return;
+            }
+
+            const btnDrive = document.getElementById('btn-drive');
+            const originalHTML = btnDrive.innerHTML;
+            btnDrive.disabled = true;
+            btnDrive.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg> Saving...';
+
+            try {
+                const token = await getAccessToken();
+
+                const csv = "install no.,barcode\n" + scannedItems.map(r => `"${r.installNo}","${r.barcode}"`).join("\n");
+                const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+                const filename = `install_records_${timestamp}.csv`;
+
+                const metadata = JSON.stringify({ name: filename, mimeType: 'text/csv' });
+                const body = new FormData();
+                body.append('metadata', new Blob([metadata], { type: 'application/json' }));
+                body.append('file', new Blob([csv], { type: 'text/csv' }));
+
+                const res = await fetch(
+                    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink',
+                    { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body }
+                );
+
+                if (!res.ok) {
+                    const err = await res.json().catch(() => ({}));
+                    throw new Error(err?.error?.message || `HTTP ${res.status}`);
+                }
+
+                const file = await res.json();
+                showToast(`Saved to Drive ✓  — tap to open`, 'success');
+
+                // Make the toast clickable to open the file
+                const toast = document.getElementById('toast');
+                toast.style.pointerEvents = 'auto';
+                toast.style.cursor = 'pointer';
+                toast.onclick = () => window.open(file.webViewLink, '_blank');
+                setTimeout(() => { toast.style.pointerEvents = 'none'; toast.onclick = null; toast.style.cursor = ''; }, 5000);
+
+            } catch (err) {
+                console.error('Drive upload error:', err);
+                showToast(`Drive error: ${err.message}`, 'error');
+                accessToken = null; // force re-auth on next attempt
+            } finally {
+                btnDrive.disabled = false;
+                btnDrive.innerHTML = originalHTML;
+            }
+        }
+
+        document.getElementById('btn-drive').addEventListener('click', saveToDrive);
+    </script>
+</body>
+
+</html>
