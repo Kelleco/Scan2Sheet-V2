@@ -101,9 +101,7 @@
             <label for="filename-input" class="text-xs font-semibold text-blue-200 whitespace-nowrap">File name:</label>
             <input id="filename-input" type="text" value="install_records"
                 class="flex-1 bg-blue-700 text-white placeholder-blue-300 text-sm font-medium px-3 py-1.5 rounded-lg border border-blue-400 focus:outline-none focus:ring-2 focus:ring-white/50 focus:border-white transition-all"
-                placeholder="e.g. site_a_records"
-                spellcheck="false"
-                autocomplete="off">
+                placeholder="e.g. site_a_records" spellcheck="false" autocomplete="off">
             <span class="text-blue-300 text-xs font-mono">.csv</span>
         </div>
     </header>
@@ -347,8 +345,8 @@
             if (!isValidBarcode(barcodeVal)) {
                 showToast("Invalid Barcode: Must be 7–13 digits.", "error"); return;
             }
-            if (isDuplicatePair(installVal, barcodeVal)) {
-                showToast(`Duplicate! ${installVal} + ${barcodeVal} already saved.`, "error"); return;
+            if (isDuplicateInstallNo(installVal)) {
+                showToast(`Install No. ${installVal} has already been used.`, "error"); return;
             }
 
             addRecordToTable(installVal, barcodeVal);
@@ -380,9 +378,9 @@
             return /^\d{7,13}$/.test(text);
         }
 
-        function isDuplicatePair(installNo, barcode, excludeIndex = -1) {
+        function isDuplicateInstallNo(installNo, excludeIndex = -1) {
             return scannedItems.some((item, i) =>
-                i !== excludeIndex && item.installNo === installNo && item.barcode === barcode
+                i !== excludeIndex && item.installNo === installNo
             );
         }
 
@@ -450,12 +448,14 @@
             if (step === 1) {
                 if (!isQR) { showToast("Wrong format. Please scan a QR Code.", "error"); lastScannedTime = now; return; }
                 if (!isValidInstallNo(decodedText)) { showToast("Invalid QR: Must be numeric 1–999.", "error"); lastScannedTime = now; return; }
+                const normInstallNo = normaliseInstallNo(decodedText);
+                if (isDuplicateInstallNo(normInstallNo)) { showToast(`Install No. ${normInstallNo} has already been used.`, "error"); lastScannedTime = now; return; }
                 if (navigator.vibrate) navigator.vibrate(50);
-                currentInstallNo = normaliseInstallNo(decodedText); step = 2; updateWorkflowUI(); lastScannedTime = now;
+                currentInstallNo = normInstallNo; step = 2; updateWorkflowUI(); lastScannedTime = now;
             } else if (step === 2) {
                 if (!isCode39) { showToast("Wrong format. Please scan a Code 39 barcode.", "error"); lastScannedTime = now; return; }
                 if (!isValidBarcode(decodedText)) { showToast("Invalid Barcode: Must be 7–13 digits.", "error"); lastScannedTime = now; return; }
-                if (isDuplicatePair(currentInstallNo, decodedText)) { showToast(`Duplicate! ${currentInstallNo} + ${decodedText} already saved.`, "error"); lastScannedTime = now; return; }
+                if (isDuplicateInstallNo(currentInstallNo)) { showToast(`Install No. ${currentInstallNo} has already been used.`, "error"); lastScannedTime = now; resetWorkflow(); return; }
                 if (navigator.vibrate) navigator.vibrate(50);
                 pendingBarcode = decodedText; step = 3; updateWorkflowUI(); lastScannedTime = now;
             }
@@ -513,8 +513,8 @@
 
             if (!isValidInstallNo(installVal)) { showToast("Invalid Install No.: Must be numeric 1–999.", "error"); return; }
             if (!isValidBarcode(barcodeVal)) { showToast("Invalid Barcode: Must be 7–13 digits.", "error"); return; }
-            if (isDuplicatePair(installVal, barcodeVal, editingIndex)) {
-                showToast(`Duplicate! ${installVal} + ${barcodeVal} already saved.`, "error"); return;
+            if (isDuplicateInstallNo(installVal, editingIndex)) {
+                showToast(`Install No. ${installVal} has already been used.`, "error"); return;
             }
 
             scannedItems[editingIndex] = { installNo: installVal, barcode: barcodeVal };
