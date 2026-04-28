@@ -348,6 +348,9 @@
             if (isDuplicateInstallNo(installVal)) {
                 showToast(`Install No. ${installVal} has already been used.`, "error"); return;
             }
+            if (isDuplicateBarcode(barcodeVal)) {
+                showToast(`Barcode ${barcodeVal} has already been used.`, "error"); return;
+            }
 
             addRecordToTable(installVal, barcodeVal);
             showToast("Pair manually saved!", "success");
@@ -381,6 +384,12 @@
         function isDuplicateInstallNo(installNo, excludeIndex = -1) {
             return scannedItems.some((item, i) =>
                 i !== excludeIndex && item.installNo === installNo
+            );
+        }
+
+        function isDuplicateBarcode(barcode, excludeIndex = -1) {
+            return scannedItems.some((item, i) =>
+                i !== excludeIndex && item.barcode === barcode
             );
         }
 
@@ -456,6 +465,7 @@
                 if (!isCode39) { showToast("Wrong format. Please scan a Code 39 barcode.", "error"); lastScannedTime = now; return; }
                 if (!isValidBarcode(decodedText)) { showToast("Invalid Barcode: Must be 7–13 digits.", "error"); lastScannedTime = now; return; }
                 if (isDuplicateInstallNo(currentInstallNo)) { showToast(`Install No. ${currentInstallNo} has already been used.`, "error"); lastScannedTime = now; resetWorkflow(); return; }
+                if (isDuplicateBarcode(decodedText)) { showToast(`Barcode ${decodedText} has already been used.`, "error"); lastScannedTime = now; return; }
                 if (navigator.vibrate) navigator.vibrate(50);
                 pendingBarcode = decodedText; step = 3; updateWorkflowUI(); lastScannedTime = now;
             }
@@ -515,6 +525,9 @@
             if (!isValidBarcode(barcodeVal)) { showToast("Invalid Barcode: Must be 7–13 digits.", "error"); return; }
             if (isDuplicateInstallNo(installVal, editingIndex)) {
                 showToast(`Install No. ${installVal} has already been used.`, "error"); return;
+            }
+            if (isDuplicateBarcode(barcodeVal, editingIndex)) {
+                showToast(`Barcode ${barcodeVal} has already been used.`, "error"); return;
             }
 
             scannedItems[editingIndex] = { installNo: installVal, barcode: barcodeVal };
