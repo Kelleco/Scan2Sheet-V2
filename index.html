@@ -9,6 +9,8 @@
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
     <!-- Google Identity Services for Drive OAuth -->
     <script src="https://accounts.google.com/gsi/client" async defer></script>
+    <!-- Google API Client Library for Picker -->
+    <script async defer src="https://apis.google.com/js/api.js" onload="onGapiLoad()"></script>
     <style>
         #reader__dashboard_section_csr span {
             display: none;
@@ -576,11 +578,17 @@
         // Authorised JavaScript origin must include your GitHub Pages URL,
         // e.g. https://yourusername.github.io
         const GOOGLE_CLIENT_ID = '12810830972-fhdnfsv95u8cc9sgjor75aqqe5phe05l.apps.googleusercontent.com';
+        const GOOGLE_API_KEY = 'AIzaSyA25Wt7ct9a1XSTHjsA-rZ0W-FsC3gw7dg'; // Replace with your Developer API Key
         const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 
         let tokenClient = null;
         let accessToken = null;
         let tokenExpiry = 0;
+        let pickerApiLoaded = false;
+
+        window.onGapiLoad = function() {
+            gapi.load('picker', { callback: () => { pickerApiLoaded = true; } });
+        };
 
         function initTokenClient() {
             if (!window.google) return; // GIS not loaded yet
@@ -619,49 +627,87 @@
             if (GOOGLE_CLIENT_ID === 'YOUR_CLIENT_ID_HERE') {
                 showToast('Add your Google Client ID to the app first.', 'error'); return;
             }
+            if (GOOGLE_API_KEY === 'YOUR_API_KEY_HERE') {
+                showToast('Add your Google API Key to the app first.', 'error'); return;
+            }
+            if (!pickerApiLoaded) {
+                showToast('Google Picker API is still loading...', 'error'); return;
+            }
 
             const btnDrive = document.getElementById('btn-drive');
             const originalHTML = btnDrive.innerHTML;
             btnDrive.disabled = true;
-            btnDrive.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg> Saving...';
+            btnDrive.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg> Starting...';
 
             try {
                 const token = await getAccessToken();
 
-                const csv = "install no.,barcode\n" + scannedItems.map(r => `"${r.installNo}","${r.barcode}"`).join("\n");
-                const rawName = document.getElementById('filename-input').value.trim() || 'install_records';
-                const filename = `${rawName}.csv`;
+                const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+                    .setIncludeFolders(true)
+                    .setMimeTypes('application/vnd.google-apps.folder')
+                    .setSelectFolderEnabled(true);
 
-                const metadata = JSON.stringify({ name: filename, mimeType: 'text/csv' });
-                const body = new FormData();
-                body.append('metadata', new Blob([metadata], { type: 'application/json' }));
-                body.append('file', new Blob([csv], { type: 'text/csv' }));
+                const picker = new google.picker.PickerBuilder()
+                    .addView(view)
+                    .setOAuthToken(token)
+                    .setDeveloperKey(GOOGLE_API_KEY)
+                    .setCallback((data) => pickerCallback(data, token, btnDrive, originalHTML))
+                    .build();
 
-                const res = await fetch(
-                    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink',
-                    { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body }
-                );
-
-                if (!res.ok) {
-                    const err = await res.json().catch(() => ({}));
-                    throw new Error(err?.error?.message || `HTTP ${res.status}`);
-                }
-
-                const file = await res.json();
-                showToast(`Saved to Drive ✓  — tap to open`, 'success');
-
-                // Make the toast clickable to open the file
-                const toast = document.getElementById('toast');
-                toast.style.pointerEvents = 'auto';
-                toast.style.cursor = 'pointer';
-                toast.onclick = () => window.open(file.webViewLink, '_blank');
-                setTimeout(() => { toast.style.pointerEvents = 'none'; toast.onclick = null; toast.style.cursor = ''; }, 5000);
+                picker.setVisible(true);
 
             } catch (err) {
-                console.error('Drive upload error:', err);
+                console.error('Drive auth error:', err);
                 showToast(`Drive error: ${err.message}`, 'error');
+                btnDrive.disabled = false;
+                btnDrive.innerHTML = originalHTML;
                 accessToken = null; // force re-auth on next attempt
-            } finally {
+            }
+        }
+
+        async function pickerCallback(data, token, btnDrive, originalHTML) {
+            if (data[google.picker.Response.ACTION] === google.picker.Action.PICKED) {
+                const folderId = data[google.picker.Response.DOCUMENTS][0].id;
+                
+                try {
+                    btnDrive.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg> Uploading...';
+
+                    const csv = "install no.,barcode\n" + scannedItems.map(r => `"${r.installNo}","${r.barcode}"`).join("\n");
+                    const rawName = document.getElementById('filename-input').value.trim() || 'install_records';
+                    const filename = `${rawName}.csv`;
+
+                    const metadata = JSON.stringify({ name: filename, mimeType: 'text/csv', parents: [folderId] });
+                    const body = new FormData();
+                    body.append('metadata', new Blob([metadata], { type: 'application/json' }));
+                    body.append('file', new Blob([csv], { type: 'text/csv' }));
+
+                    const res = await fetch(
+                        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink',
+                        { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body }
+                    );
+
+                    if (!res.ok) {
+                        const err = await res.json().catch(() => ({}));
+                        throw new Error(err?.error?.message || `HTTP ${res.status}`);
+                    }
+
+                    const file = await res.json();
+                    showToast(`Saved to Folder ✓  — tap to open`, 'success');
+
+                    const toast = document.getElementById('toast');
+                    toast.style.pointerEvents = 'auto';
+                    toast.style.cursor = 'pointer';
+                    toast.onclick = () => window.open(file.webViewLink, '_blank');
+                    setTimeout(() => { toast.style.pointerEvents = 'none'; toast.onclick = null; toast.style.cursor = ''; }, 5000);
+
+                } catch(err) {
+                    console.error('Upload error:', err);
+                    showToast(`Upload error: ${err.message}`, 'error');
+                } finally {
+                    btnDrive.disabled = false;
+                    btnDrive.innerHTML = originalHTML;
+                }
+            } else if (data[google.picker.Response.ACTION] === google.picker.Action.CANCEL) {
                 btnDrive.disabled = false;
                 btnDrive.innerHTML = originalHTML;
             }
