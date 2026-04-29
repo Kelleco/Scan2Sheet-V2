@@ -586,7 +586,7 @@
         let tokenExpiry = 0;
         let pickerApiLoaded = false;
 
-        window.onGapiLoad = function() {
+        window.onGapiLoad = function () {
             gapi.load('picker', { callback: () => { pickerApiLoaded = true; } });
         };
 
@@ -668,7 +668,7 @@
         async function pickerCallback(data, token, btnDrive, originalHTML) {
             if (data[google.picker.Response.ACTION] === google.picker.Action.PICKED) {
                 const folderId = data[google.picker.Response.DOCUMENTS][0].id;
-                
+
                 try {
                     btnDrive.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg> Uploading...';
 
@@ -700,7 +700,7 @@
                     toast.onclick = () => window.open(file.webViewLink, '_blank');
                     setTimeout(() => { toast.style.pointerEvents = 'none'; toast.onclick = null; toast.style.cursor = ''; }, 5000);
 
-                } catch(err) {
+                } catch (err) {
                     console.error('Upload error:', err);
                     showToast(`Upload error: ${err.message}`, 'error');
                 } finally {
