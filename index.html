@@ -7,10 +7,6 @@
     <title>Dual Barcode Scanner</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
-    <!-- Google Identity Services for Drive OAuth -->
-    <script src="https://accounts.google.com/gsi/client" async defer></script>
-    <!-- Google API Client Library for Picker -->
-    <script async defer src="https://apis.google.com/js/api.js" onload="onGapiLoad()"></script>
     <style>
         #reader__dashboard_section_csr span {
             display: none;
@@ -183,28 +179,6 @@
                         </svg>
                         CSV
                     </button>
-                    <button id="btn-drive"
-                        class="text-sm bg-blue-500 hover:bg-blue-600 text-white px-3 py-1.5 rounded flex items-center gap-1 transition-colors font-medium shadow-sm">
-                        <svg class="w-4 h-4" viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
-                            <path
-                                d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z"
-                                fill="#fff" />
-                            <path
-                                d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z"
-                                fill="#fff" />
-                            <path
-                                d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z"
-                                fill="#fff" />
-                            <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z"
-                                fill="#fff" />
-                            <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z"
-                                fill="#fff" />
-                            <path
-                                d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 28h27.45c0-1.55-.4-3.1-1.2-4.5z"
-                                fill="#fff" />
-                        </svg>
-                        Drive
-                    </button>
                 </div>
             </div>
             <div class="overflow-y-auto flex-1 p-0">
@@ -325,16 +299,23 @@
             }
         });
 
-        btnStop.addEventListener('click', async () => {
-            if (isScanning) {
-                try {
-                    await html5QrCode.stop();
-                    isScanning = false;
-                    btnStop.classList.add('hidden');
-                    btnStart.classList.remove('hidden');
-                    cameraPlaceholder.style.display = 'block';
-                } catch (err) { console.error("Failed to stop scanner", err); }
-            }
+        async function stopCamera() {
+            if (!isScanning) return;
+            try {
+                await html5QrCode.stop();
+                isScanning = false;
+                btnStop.classList.add('hidden');
+                btnStart.classList.remove('hidden');
+                cameraPlaceholder.style.display = 'block';
+            } catch (err) { console.error("Failed to stop scanner", err); }
+        }
+
+        btnStop.addEventListener('click', stopCamera);
+
+        // Release the camera when the app is backgrounded / screen locked /
+        // tab hidden. User must tap Start Camera again to resume.
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'hidden') stopCamera();
         });
 
         // ── Manual Entry ─────────────────────────────────────────────────
@@ -595,18 +576,49 @@
         };
 
         // ── Export ────────────────────────────────────────────────────────
-        btnExport.addEventListener('click', () => {
+        btnExport.addEventListener('click', async () => {
             if (scannedItems.length === 0) { showToast("No records to export yet!", "error"); return; }
             const csv = "install no.,barcode\n" + scannedItems.map(r => `"${r.installNo}","${r.barcode}"`).join("\n");
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const url = URL.createObjectURL(blob);
+            const rawName = document.getElementById('filename-input').value.trim() || 'install_records';
+            const filename = `${rawName}.csv`;
+
+            // 1. Desktop Chrome/Edge & Android Chrome: native "Save As" dialog.
+            if (window.showSaveFilePicker) {
+                try {
+                    const handle = await window.showSaveFilePicker({
+                        suggestedName: filename,
+                        types: [{ description: 'CSV file', accept: { 'text/csv': ['.csv'] } }]
+                    });
+                    const writable = await handle.createWritable();
+                    await writable.write(new Blob([csv], { type: 'text/csv;charset=utf-8;' }));
+                    await writable.close();
+                    showToast("CSV saved!", "success");
+                } catch (err) {
+                    if (err.name !== 'AbortError') { console.error("Save failed:", err); showToast(`Save failed: ${err.message}`, "error"); }
+                }
+                return;
+            }
+
+            // 2. iOS / mobile: OS share sheet → "Save to Files" / folder picker.
+            const file = new File([csv], filename, { type: 'text/csv' });
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                try {
+                    await navigator.share({ files: [file], title: filename });
+                } catch (err) {
+                    if (err.name !== 'AbortError') { console.error("Share failed:", err); showToast(`Share failed: ${err.message}`, "error"); }
+                }
+                return;
+            }
+
+            // 3. Fallback: classic download (desktop Firefox, older browsers).
+            const url = URL.createObjectURL(file);
             const link = document.createElement("a");
             link.setAttribute("href", url);
-            const rawName = document.getElementById('filename-input').value.trim() || 'install_records';
-            link.setAttribute("download", `${rawName}.csv`);
+            link.setAttribute("download", filename);
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
+            URL.revokeObjectURL(url);
         });
 
         // ── Clear ─────────────────────────────────────────────────────────
@@ -619,147 +631,6 @@
             confirmModal.classList.add('hidden');
             showToast("Records cleared.", "success");
         });
-        // ── Google Drive ───────────────────────────────────────────────────
-        // ⚠️  Replace with your OAuth 2.0 Client ID from Google Cloud Console.
-        // Authorised JavaScript origin must include your GitHub Pages URL,
-        // e.g. https://yourusername.github.io
-        const GOOGLE_CLIENT_ID = '12810830972-fhdnfsv95u8cc9sgjor75aqqe5phe05l.apps.googleusercontent.com';
-        const GOOGLE_API_KEY = 'AIzaSyA25Wt7ct9a1XSTHjsA-rZ0W-FsC3gw7dg'; // Replace with your Developer API Key
-        const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
-
-        let tokenClient = null;
-        let accessToken = null;
-        let tokenExpiry = 0;
-        let pickerApiLoaded = false;
-
-        window.onGapiLoad = function () {
-            gapi.load('picker', { callback: () => { pickerApiLoaded = true; } });
-        };
-
-        function initTokenClient() {
-            if (!window.google) return; // GIS not loaded yet
-            tokenClient = google.accounts.oauth2.initTokenClient({
-                client_id: GOOGLE_CLIENT_ID,
-                scope: DRIVE_SCOPE,
-                callback: '' // set dynamically per-request
-            });
-        }
-
-        // Called by the GIS script once loaded
-        window.onGoogleLibraryLoad = initTokenClient;
-
-        function getAccessToken() {
-            return new Promise((resolve, reject) => {
-                if (!tokenClient) {
-                    reject(new Error('Google Identity Services not loaded yet. Check your internet connection.'));
-                    return;
-                }
-                if (accessToken && Date.now() < tokenExpiry) {
-                    resolve(accessToken); return;
-                }
-                tokenClient.callback = (response) => {
-                    if (response.error) { reject(new Error(response.error)); return; }
-                    accessToken = response.access_token;
-                    tokenExpiry = Date.now() + (response.expires_in * 1000) - 60000;
-                    resolve(accessToken);
-                };
-                // Skip consent screen if we already have a cached token
-                tokenClient.requestAccessToken({ prompt: accessToken ? '' : 'consent' });
-            });
-        }
-
-        async function saveToDrive() {
-            if (scannedItems.length === 0) { showToast('No records to save!', 'error'); return; }
-            if (GOOGLE_CLIENT_ID === 'YOUR_CLIENT_ID_HERE') {
-                showToast('Add your Google Client ID to the app first.', 'error'); return;
-            }
-            if (GOOGLE_API_KEY === 'YOUR_API_KEY_HERE') {
-                showToast('Add your Google API Key to the app first.', 'error'); return;
-            }
-            if (!pickerApiLoaded) {
-                showToast('Google Picker API is still loading...', 'error'); return;
-            }
-
-            const btnDrive = document.getElementById('btn-drive');
-            const originalHTML = btnDrive.innerHTML;
-            btnDrive.disabled = true;
-            btnDrive.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg> Starting...';
-
-            try {
-                const token = await getAccessToken();
-
-                const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
-                    .setIncludeFolders(true)
-                    .setMimeTypes('application/vnd.google-apps.folder')
-                    .setSelectFolderEnabled(true);
-
-                const picker = new google.picker.PickerBuilder()
-                    .addView(view)
-                    .setOAuthToken(token)
-                    .setDeveloperKey(GOOGLE_API_KEY)
-                    .setCallback((data) => pickerCallback(data, token, btnDrive, originalHTML))
-                    .build();
-
-                picker.setVisible(true);
-
-            } catch (err) {
-                console.error('Drive auth error:', err);
-                showToast(`Drive error: ${err.message}`, 'error');
-                btnDrive.disabled = false;
-                btnDrive.innerHTML = originalHTML;
-                accessToken = null; // force re-auth on next attempt
-            }
-        }
-
-        async function pickerCallback(data, token, btnDrive, originalHTML) {
-            if (data[google.picker.Response.ACTION] === google.picker.Action.PICKED) {
-                const folderId = data[google.picker.Response.DOCUMENTS][0].id;
-
-                try {
-                    btnDrive.innerHTML = '<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path></svg> Uploading...';
-
-                    const csv = "install no.,barcode\n" + scannedItems.map(r => `"${r.installNo}","${r.barcode}"`).join("\n");
-                    const rawName = document.getElementById('filename-input').value.trim() || 'install_records';
-                    const filename = `${rawName}.csv`;
-
-                    const metadata = JSON.stringify({ name: filename, mimeType: 'text/csv', parents: [folderId] });
-                    const body = new FormData();
-                    body.append('metadata', new Blob([metadata], { type: 'application/json' }));
-                    body.append('file', new Blob([csv], { type: 'text/csv' }));
-
-                    const res = await fetch(
-                        'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink',
-                        { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body }
-                    );
-
-                    if (!res.ok) {
-                        const err = await res.json().catch(() => ({}));
-                        throw new Error(err?.error?.message || `HTTP ${res.status}`);
-                    }
-
-                    const file = await res.json();
-                    showToast(`Saved to Folder ✓  — tap to open`, 'success');
-
-                    const toast = document.getElementById('toast');
-                    toast.style.pointerEvents = 'auto';
-                    toast.style.cursor = 'pointer';
-                    toast.onclick = () => window.open(file.webViewLink, '_blank');
-                    setTimeout(() => { toast.style.pointerEvents = 'none'; toast.onclick = null; toast.style.cursor = ''; }, 5000);
-
-                } catch (err) {
-                    console.error('Upload error:', err);
-                    showToast(`Upload error: ${err.message}`, 'error');
-                } finally {
-                    btnDrive.disabled = false;
-                    btnDrive.innerHTML = originalHTML;
-                }
-            } else if (data[google.picker.Response.ACTION] === google.picker.Action.CANCEL) {
-                btnDrive.disabled = false;
-                btnDrive.innerHTML = originalHTML;
-            }
-        }
-
-        document.getElementById('btn-drive').addEventListener('click', saveToDrive);
     </script>
 </body>
 
