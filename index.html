@@ -471,8 +471,8 @@
         // ── Scanner Callback ──────────────────────────────────────────────
         // Use a short debounce during Code 39 buffering so the 4 reads
         // accumulate quickly; keep the longer debounce for QR scanning.
-        const DEBOUNCE_QR   = 1500; // ms between QR reads
-        const DEBOUNCE_C39  =  300; // ms between Code 39 buffer reads
+        const DEBOUNCE_QR = 1500; // ms between QR reads
+        const DEBOUNCE_C39 = 300; // ms between Code 39 buffer reads
         function onScanSuccess(decodedText, decodedResult) {
             const now = Date.now();
             const debounce = step === 2 ? DEBOUNCE_C39 : DEBOUNCE_QR;
