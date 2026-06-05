@@ -5,8 +5,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Dual Barcode Scanner</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+    <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8" type="text/javascript"></script>
     <style>
         #reader__dashboard_section_csr span {
             display: none;
@@ -450,7 +450,7 @@
         };
 
         // ── Scanner Callback ──────────────────────────────────────────────
-        // Use a short debounce during Code 39 buffering so the 4 reads
+        // Use a short debounce during Code 39 buffering so the repeated reads
         // accumulate quickly; keep the longer debounce for QR scanning.
         const DEBOUNCE_QR = 1500; // ms between QR reads
         const DEBOUNCE_C39 = 300; // ms between Code 39 buffer reads
