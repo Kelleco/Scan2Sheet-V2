@@ -62,6 +62,21 @@
         </div>
     </div>
 
+    <!-- Confirm Delete Modal -->
+    <div id="delete-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-[60]">
+        <div class="bg-white rounded-xl p-5 max-w-sm w-11/12 shadow-xl">
+            <h3 class="text-lg font-bold text-gray-900 mb-2">Delete Record?</h3>
+            <p id="delete-message" class="text-sm text-gray-600 mb-4">Are you sure you want to delete this record? This
+                cannot be undone.</p>
+            <div class="flex justify-end gap-3">
+                <button id="delete-cancel"
+                    class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors">Cancel</button>
+                <button id="delete-confirm"
+                    class="px-4 py-2 text-sm font-medium text-white bg-red-600 hover:bg-red-700 rounded-lg transition-colors">Delete</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Edit Modal -->
     <div id="edit-modal" class="fixed inset-0 bg-black/50 hidden flex items-center justify-center z-[60]">
         <div class="bg-white rounded-xl p-5 max-w-sm w-11/12 shadow-xl">
@@ -210,6 +225,7 @@
         let pendingBarcode = null;
         let lastScannedTime = 0;
         let editingIndex = null;
+        let deletingIndex = null;
 
         // ── Code 39 Error-Correction Buffer ──────────────────────────────
         // The barcode must be read the same value REQUIRED_READS times in a
@@ -230,6 +246,10 @@
         const confirmModal = document.getElementById('confirm-modal');
         const modalCancel = document.getElementById('modal-cancel');
         const modalConfirm = document.getElementById('modal-confirm');
+        const deleteModal = document.getElementById('delete-modal');
+        const deleteMessage = document.getElementById('delete-message');
+        const deleteCancel = document.getElementById('delete-cancel');
+        const deleteConfirm = document.getElementById('delete-confirm');
         const editModal = document.getElementById('edit-modal');
         const editInstall = document.getElementById('edit-install');
         const editBarcode = document.getElementById('edit-barcode');
@@ -257,7 +277,12 @@
 
         // ── Init ─────────────────────────────────────────────────────────
         window.addEventListener('load', () => {
-            html5QrCode = new Html5Qrcode("reader");
+            html5QrCode = new Html5Qrcode("reader", {
+                formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.CODE_39],
+                // Use the native BarcodeDetector where available (Android Chrome) —
+                // far more robust on long 1D barcodes than the bundled ZXing decoder.
+                experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+            });
             loadFromStorage();
 
             // iOS fix: set playsinline on the video element html5-qrcode creates
@@ -281,8 +306,12 @@
                 await html5QrCode.start(
                     { facingMode: "environment" },
                     {
-                        fps: 10, qrbox: { width: 250, height: 150 },
-                        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE, Html5QrcodeSupportedFormats.CODE_39]
+                        fps: 10,
+                        // Wide scan box sized to the viewfinder so the barcode spans more pixels
+                        qrbox: (w, h) => ({ width: Math.floor(w * 0.9), height: Math.floor(h * 0.5) }),
+                        // Request HD so each Code 39 bar gets several pixels; low resolution
+                        // makes narrow/wide bars merge and drops repeated digits (e.g. 1111 → 111)
+                        videoConstraints: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } }
                     },
                     onScanSuccess
                 );
@@ -334,14 +363,15 @@
             if (!isValidBarcode(barcodeVal)) {
                 showToast("Invalid Barcode: Must be 7–13 digits.", "error"); return;
             }
-            if (isDuplicateInstallNo(installVal)) {
-                showToast(`Install No. ${installVal} has already been used.`, "error"); return;
+            const installNo = normaliseInstallNo(installVal);
+            if (isDuplicateInstallNo(installNo)) {
+                showToast(`Install No. ${installNo} has already been used.`, "error"); return;
             }
             if (isDuplicateBarcode(barcodeVal)) {
                 showToast(`Barcode ${barcodeVal} has already been used.`, "error"); return;
             }
 
-            addRecordToTable(installVal, barcodeVal);
+            addRecordToTable(installNo, barcodeVal);
             showToast("Pair manually saved!", "success");
             manualInstall.value = '';
             manualBarcode.value = '';
@@ -552,14 +582,15 @@
 
             if (!isValidInstallNo(installVal)) { showToast("Invalid Install No.: Must be numeric 1–999.", "error"); return; }
             if (!isValidBarcode(barcodeVal)) { showToast("Invalid Barcode: Must be 7–13 digits.", "error"); return; }
-            if (isDuplicateInstallNo(installVal, editingIndex)) {
-                showToast(`Install No. ${installVal} has already been used.`, "error"); return;
+            const installNo = normaliseInstallNo(installVal);
+            if (isDuplicateInstallNo(installNo, editingIndex)) {
+                showToast(`Install No. ${installNo} has already been used.`, "error"); return;
             }
             if (isDuplicateBarcode(barcodeVal, editingIndex)) {
                 showToast(`Barcode ${barcodeVal} has already been used.`, "error"); return;
             }
 
-            scannedItems[editingIndex] = { installNo: installVal, barcode: barcodeVal };
+            scannedItems[editingIndex] = { installNo, barcode: barcodeVal };
             saveToStorage();
             updateTableUI();
             editModal.classList.add('hidden');
@@ -569,11 +600,21 @@
 
         // ── Delete ────────────────────────────────────────────────────────
         window.deleteRecord = (index) => {
-            scannedItems.splice(index, 1);
+            deletingIndex = index;
+            const item = scannedItems[index];
+            deleteMessage.innerText = `Are you sure you want to delete Install No. ${item.installNo} (barcode ${item.barcode})? This cannot be undone.`;
+            deleteModal.classList.remove('hidden');
+        };
+
+        deleteCancel.addEventListener('click', () => { deleteModal.classList.add('hidden'); deletingIndex = null; });
+        deleteConfirm.addEventListener('click', () => {
+            scannedItems.splice(deletingIndex, 1);
             saveToStorage();
             updateTableUI();
+            deleteModal.classList.add('hidden');
+            deletingIndex = null;
             showToast("Record deleted.", "success");
-        };
+        });
 
         // ── Export ────────────────────────────────────────────────────────
         btnExport.addEventListener('click', async () => {
