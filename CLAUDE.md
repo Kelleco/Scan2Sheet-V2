@@ -47,5 +47,5 @@ Functions invoked from inline `onclick` handlers in template strings (`resetWork
 
 - The table is re-rendered wholesale by `updateTableUI()` (innerHTML from a `.map`) — there is no incremental DOM diffing; row indices in `onclick="...(${i})"` are positional into `scannedItems`.
 - A `MutationObserver` reapplies `playsinline`/`webkit-playsinline` to the `<video>` element that html5-qrcode injects, to stop iOS forcing fullscreen — preserve this if touching camera init.
-- `showToast` is the only user feedback channel.
+- `showToast` is the only visual feedback channel. Audio cues use the Web Audio API: `beepAccept()` (high) on QR accept and on Code 39 confirmation, `beepMismatch()` (low double) when a Code 39 read differs from the buffered one. The `AudioContext` is created/resumed by `unlockAudio()` in the Start Camera click handler — keep it inside a user gesture or iOS will stay silent.
 - All user-facing copy uses en-dash ranges (e.g. `1–999`, `7–13`); match this when editing strings.

@@ -233,6 +233,38 @@
         const REQUIRED_READS = 2;
         let barcodeReadBuffer = []; // stores successive Code 39 reads
 
+        // ── Audio Feedback (Web Audio API) ───────────────────────────────
+        // The AudioContext must be created/resumed inside a user gesture
+        // (iOS autoplay policy) — see unlockAudio() in the Start handler.
+        let audioCtx = null;
+        function unlockAudio() {
+            try {
+                const Ctx = window.AudioContext || window.webkitAudioContext;
+                if (!Ctx) return;
+                if (!audioCtx) audioCtx = new Ctx();
+                if (audioCtx.state === 'suspended') audioCtx.resume();
+            } catch (e) { /* audio unsupported — ignore */ }
+        }
+        function tone(freq, start, dur) {
+            if (!audioCtx) return;
+            try {
+                const t0 = audioCtx.currentTime + start;
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = 'square';
+                osc.frequency.value = freq;
+                gain.gain.setValueAtTime(0.0001, t0);
+                gain.gain.exponentialRampToValueAtTime(0.25, t0 + 0.01);
+                gain.gain.setValueAtTime(0.25, t0 + dur - 0.02);
+                gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+                osc.connect(gain).connect(audioCtx.destination);
+                osc.start(t0);
+                osc.stop(t0 + dur + 0.01);
+            } catch (e) { /* ignore */ }
+        }
+        function beepAccept() { tone(2000, 0, 0.12); }                          // high single beep
+        function beepMismatch() { tone(400, 0, 0.12); tone(400, 0.18, 0.12); } // low double beep
+
         // UI refs
         const btnStart = document.getElementById('btn-start');
         const btnStop = document.getElementById('btn-stop');
@@ -301,6 +333,7 @@
 
         // ── Camera ───────────────────────────────────────────────────────
         btnStart.addEventListener('click', async () => {
+            unlockAudio();
             try {
                 cameraPlaceholder.style.display = 'none';
                 await html5QrCode.start(
@@ -500,6 +533,7 @@
                 const normInstallNo = normaliseInstallNo(decodedText);
                 if (isDuplicateInstallNo(normInstallNo)) { showToast(`Install No. ${normInstallNo} has already been used.`, "error"); lastScannedTime = now; return; }
                 if (navigator.vibrate) navigator.vibrate(50);
+                beepAccept();
                 currentInstallNo = normInstallNo; step = 2; updateWorkflowUI(); lastScannedTime = now;
             } else if (step === 2) {
                 if (!isCode39) { showToast("Wrong format. Please scan a Code 39 barcode.", "error"); lastScannedTime = now; return; }
@@ -512,6 +546,7 @@
                 if (lastBuffered !== undefined && lastBuffered !== decodedText) {
                     // Different value — reset and start fresh with the new read
                     barcodeReadBuffer = [];
+                    beepMismatch();
                     showToast(`Barcode changed – restarting confirmation (was ${lastBuffered})`, "error");
                 }
                 barcodeReadBuffer.push(decodedText);
@@ -522,6 +557,7 @@
                 if (barcodeReadBuffer.length >= REQUIRED_READS) {
                     // All reads matched — advance to confirm step
                     if (navigator.vibrate) navigator.vibrate([50, 80, 50]);
+                    beepAccept();
                     pendingBarcode = decodedText;
                     barcodeReadBuffer = [];
                     step = 3;
